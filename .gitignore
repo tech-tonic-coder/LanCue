@@ -1,0 +1,48 @@
+# Build output
+build/
+out/
+bin/
+cmake-build-*/
+
+# vcpkg (installed via VCPKG_ROOT, not vendored in-repo)
+vcpkg_installed/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+CMakeSettings.json
+
+# Qt Creator
+CMakeLists.txt.user
+
+# Xcode
+*.xcodeproj/
+DerivedData/
+
+# CLion / JetBrains
+.idea/
+cmake-build-debug/
+cmake-build-release/
+
+# Compiler / linker artifacts
+*.obj
+*.o
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.so
+*.dylib
+*.app
+
+# Logs
+*.log
+
+# OS cruft
+.DS_Store
+Thumbs.db

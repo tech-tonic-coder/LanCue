@@ -1,0 +1,300 @@
+name: CI
+
+# This file didn't exist anywhere in the archive as of Phase 8, round 6 —
+# every earlier phase's roadmap entry that mentions "a stub-audit CI step"
+# or similar was referring to something that either lived outside what
+# Mahdi's archive/zip includes, or was aspirational and never actually
+# committed.
+#
+# Round 6's first draft of this file used the vcpkg GitHub-Actions-native
+# binary cache (`x-gha`) and assumed the Ninja generator would just find
+# MSVC on a Windows runner. Both were wrong, caught by comparing against a
+# battle-tested CI workflow from a different Qt/C++ project of Mahdi's
+# (markdawn) that happens to pin the exact same vcpkg builtin-baseline
+# commit — meaning it builds the literal same vcpkg qtbase port LanCue
+# does, so its fixes transfer directly rather than needing to be
+# re-derived from scratch:
+#   - x-gha was removed from vcpkg entirely around April 2025
+#     (microsoft/vcpkg-tool#1662, confirmed directly against vcpkg's own
+#     June 2025 "What's New" blog post and Microsoft's own docs, which now
+#     carry an explicit removal notice) — silently disables caching rather
+#     than failing loudly, so round 6's version would have quietly
+#     rebuilt Qt6 from source on every single run. actions/cache on
+#     build/<preset>/vcpkg_installed (below) is the GitHub-Actions-team-
+#     endorsed replacement.
+#   - windows-x64-debug (see CMakePresets.json) uses the Ninja generator,
+#     which — unlike the Visual Studio generator — does not put MSVC's
+#     cl.exe/link.exe on PATH by itself; without setting that up first,
+#     CMake can silently fall back to Git for Windows' bundled MinGW g++
+#     (always on PATH on these runners), which mismatches the
+#     x64-windows vcpkg triplet's MSVC ABI.
+# Neither of these had actually been run on GitHub's own infrastructure
+# before being caught — see the Phase 8 roadmap entry (round 7) for the
+# full account, including what's still unverified because it hasn't
+# actually executed there yet either.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The exact commit vcpkg.json's own builtin-baseline pins — kept as one
+  # env var read by every OS leg below rather than repeated per-job, so a
+  # baseline bump only ever needs changing here.
+  VCPKG_PINNED_COMMIT: a7bd30319eeac16afbe18d64a855303a0a425e84
+
+jobs:
+  build:
+    # Safety bound against a hung/runaway step, not a speed guarantee — a
+    # cold cache genuinely takes a while because Qt6 is compiled from
+    # source. actions/cache below is the real lever for keeping *repeat*
+    # runs fast; this first run per platform has never actually happened
+    # on GitHub's infrastructure, so how close to 90 minutes it comes is
+    # itself unverified.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # windows-x64-local (a personal dev-machine preset with a
+          # hardcoded D:\ vcpkg path — see CMakePresets.json's own
+          # comment) is never used in CI.
+          - os: ubuntu-latest
+            preset: linux-x64-debug
+          - os: windows-latest
+            preset: windows-x64-debug
+          - os: macos-latest
+            preset: macos-arm64-debug
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ninja itself isn't preinstalled on every runner image either — see
+      # this job's own top comment for why Ninja needs MSVC's environment
+      # set up alongside it, Windows-only (ubuntu-latest and macos-latest
+      # both already carry ninja via their own system package managers,
+      # installed explicitly below anyway since that's also where the
+      # rest of each platform's build dependencies get installed).
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      # autoconf/automake/libtool: several of qtbase's own vcpkg
+      # dependencies (libb2 among them — confirmed via vcpkg's own package
+      # page listing qtbase as a consumer) build via autotools
+      # (vcpkg_configure_make), which vcpkg does not vendor on Linux/macOS
+      # the way it transparently bootstraps a private MSYS2 for this on
+      # Windows — these need to already be on PATH.
+      #
+      # The X11/xcb/OpenGL/EGL dev package list is Qt's own official
+      # Linux build requirements (doc.qt.io/qt-6/linux-requirements.html):
+      # building qtbase's xcb platform plugin and OpenGL/EGL support from
+      # source needs these against the actual system's X11/Mesa stack;
+      # vcpkg does not provide substitutes for them (its own `opengl` port
+      # is an intentional no-op on Linux). All package names confirmed to
+      # exist on Ubuntu 24.04 (the ubuntu-latest runner's actual OS).
+      #
+      # libx11-dev/libxi-dev specifically are also Phase 8's own
+      # dependency (the XInput2 mouse-move hook) — see
+      # core-lib/CMakeLists.txt's own find_package(X11) comment — already
+      # covered by this same list, not a separate install.
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build autoconf autoconf-archive automake libtool libltdl-dev \
+            libfontconfig1-dev libfreetype-dev libgtk-3-dev \
+            libx11-dev libx11-xcb-dev \
+            libxcb-cursor-dev libxcb-glx0-dev libxcb-icccm4-dev libxcb-image0-dev \
+            libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
+            libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-util-dev \
+            libxcb-xfixes0-dev libxcb-xinput-dev libxcb-xkb-dev libxcb1-dev \
+            libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            xvfb
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja autoconf autoconf-archive automake libtool
+
+      # Started here (before vcpkg/Qt6 even builds), not just before the
+      # smoke-test step at the very end: ctest's own integration-tests
+      # suite below spawns a real lancue-core subprocess and needs a
+      # display just as much as the smoke test does (lancue-core has been
+      # a real QApplication, not QCoreApplication, since Phase 7) — found
+      # exactly this way, the hard way, in round 6's own sandbox
+      # verification (3/93 tests failed with no display, 93/93 passed
+      # once Xvfb ran before ctest instead of after it). Exporting
+      # DISPLAY via GITHUB_ENV makes it available to every later step in
+      # this job, not just the one it's declared in.
+      - name: Start a virtual X server for the rest of this job (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      # Pinned to the exact commit in vcpkg.json's builtin-baseline (see
+      # this file's own VCPKG_PINNED_COMMIT) so CI and local dev always
+      # resolve the same package versions. This is a FULL clone, not
+      # shallow (`--depth 1`): vcpkg's own baseline-checkout logic runs
+      # `git show <sha>:versions/baseline.json` internally, and shallow
+      # history is a documented cause of that failing with "path exists
+      # on disk, but not in <commit>" even when the commit itself fetched
+      # correctly. Costs a few extra minutes of clone time, negligible
+      # next to the Qt6 build itself.
+      - name: Clone vcpkg (pinned to builtin-baseline commit)
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg "${{ github.workspace }}/vcpkg"
+          git -C "${{ github.workspace }}/vcpkg" checkout "$VCPKG_PINNED_COMMIT"
+
+      - name: Bootstrap vcpkg (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        run: ${{ github.workspace }}\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Set VCPKG_ROOT
+        shell: bash
+        run: echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> "$GITHUB_ENV"
+
+      # vcpkg's own GitHub-Actions-native binary cache (x-gha) was removed
+      # upstream (microsoft/vcpkg-tool#1662) and must not be used — see
+      # this file's own top comment. This caches the whole
+      # build/<preset>/vcpkg_installed tree via actions/cache instead:
+      # coarser than per-port caching (any vcpkg.json change invalidates
+      # everything), but it's the method the GitHub Actions team
+      # currently endorses, and is enough to avoid rebuilding Qt6 from
+      # source (very slow) on every run — the real lever for keeping
+      # repeat CI runs short (see this job's own timeout-minutes note).
+      # The path is build/${{ matrix.preset }}/vcpkg_installed, not a
+      # flat build/vcpkg_installed: CMakePresets.json's own `base` preset
+      # sets binaryDir to ${sourceDir}/build/${presetName} (confirmed by
+      # reading it directly, not assumed), and every other preset
+      # inherits that rather than overriding it.
+      - name: Cache vcpkg-built packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/${{ matrix.preset }}/vcpkg_installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ matrix.os }}-
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Run tests (ctest)
+        run: ctest --preset ${{ matrix.preset }}
+
+      # Verifies: the real daemon starts cleanly against a live (virtual)
+      # X server, with Phase 8's mouse hook installing successfully and
+      # nothing else logging an unexpected ERROR.
+      #
+      # Does NOT verify: actual XI_RawMotion event delivery from real
+      # mouse movement. Xvfb doesn't route synthetic pointer motion
+      # (XWarpPointer, xdotool) through XInput2's raw-event pipeline —
+      # confirmed during Phase 8's own sandbox verification (round 1) by
+      # isolating the gap: the same event-loop plumbing does receive
+      # plain core MotionNotify from the same synthetic input, so this is
+      # Xvfb's own limitation, not a bug in the code being tested. A
+      # kernel-level virtual mouse via /dev/uinput, read by a real
+      # Xorg+libinput server (not Xvfb), is the theoretical way to close
+      # this gap — unattempted here; whether GitHub-hosted runners even
+      # expose /dev/uinput is unverified.
+      - name: Smoke test — start the real daemon and check its own log
+        if: runner.os == 'Linux'
+        env:
+          HOME: ${{ runner.temp }}/lancue-home
+        run: |
+          set -e
+          mkdir -p "$HOME"
+          LOG_FILE="$RUNNER_TEMP/lancue-core-stdout.log"
+          # Debug builds also echo every log line to stderr (see
+          # logger.cpp's own #ifndef NDEBUG) — this preset is Debug, so
+          # that's what this captures, rather than reading the on-disk
+          # log file directly (simpler, and it's the same content).
+          timeout 5 ./build/linux-x64-debug/lancue-core/lancue-core > "$LOG_FILE" 2>&1 || true
+
+          cat "$LOG_FILE"
+
+          # Fails the job loudly if any of Phase 8's own three features
+          # didn't report a clean start, or if anything logged an ERROR
+          # at all (the pre-existing, expected Linux stub errors for
+          # Phases 2/3's keyboard-layout-watcher/global-hotkey-manager,
+          # and their own downstream consequences — LayoutWatcherFeature/
+          # GlobalHotkeyFeature/FeatureRegistry each logging that the
+          # feature they depend on failed to start — are the one known
+          # exception, confirmed against a real run of this exact job
+          # rather than guessed; grep them out explicitly rather than
+          # ignoring ERROR wholesale, so a *new* error still fails this
+          # the way it should).
+          grep -q "MouseMoveHookLinux: XInput2 raw-motion selection installed." "$LOG_FILE"
+          grep -q "MouseWatcherFeature: started." "$LOG_FILE"
+          grep -q "FollowerFeature: started." "$LOG_FILE"
+          if grep "ERROR" "$LOG_FILE" \
+              | grep -v "KeyboardLayoutWatcherLinux: not yet implemented" \
+              | grep -v "LayoutWatcherFeature: platform watcher failed to start" \
+              | grep -v "GlobalHotkeyManagerLinux: not yet implemented" \
+              | grep -v "GlobalHotkeyFeature: failed to register hotkey" \
+              | grep -v "FeatureRegistry: a feature failed to start" \
+              | grep -q .; then
+            echo "::error::Unexpected ERROR line(s) in lancue-core's own log — see output above."
+            exit 1
+          fi
+
+      # Exploratory, unlike the Linux smoke test above: whether a
+      # GitHub-hosted Windows runner's session behaves enough like a real
+      # interactive desktop for SetWindowsHookExW/window creation to
+      # succeed the same way they do on Mahdi's own machine hasn't been
+      # confirmed by an actual run of this workflow yet.
+      - name: Smoke test — start the real daemon (exploratory)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath ".\build\windows-x64-debug\lancue-core\lancue-core.exe" -PassThru
+          Start-Sleep -Seconds 5
+          $logPath = Join-Path $env:LOCALAPPDATA "lancue-core\logs\lancue-core.log"
+          if (-not (Test-Path $logPath)) {
+            Write-Host "::error::No log file at $logPath — lancue-core may not have started at all under this runner's session."
+            Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Get-Content $logPath -Tail 60
+          Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
+
+          $log = Get-Content $logPath -Raw
+          if ($log -notmatch "MouseMoveHookWindows: low-level mouse hook installed\.") {
+            Write-Host "::error::MouseMoveHookWindows never reported a successful install."
+            exit 1
+          }
+          if ($log -notmatch "FollowerFeature: started\.") {
+            Write-Host "::error::FollowerFeature never reported a successful start."
+            exit 1
+          }
+
+      # No run/smoke-test step for macOS: CGEventTapCreate will
+      # legitimately return null without Input Monitoring permission,
+      # which no CI runner has granted, so a failed hook install here is
+      # the *expected*, already-documented graceful-failure path (see
+      # mouse_move_hook_macos.h's own header comment) rather than
+      # something worth asserting on. The build + ctest steps above are
+      # what this job actually verifies for macOS — still real value:
+      # the first genuine compiler evidence of any kind for
+      # mouse_move_hook_macos.cpp (CGEventTap/ApplicationServices), which
+      # had none at all before this workflow existed.

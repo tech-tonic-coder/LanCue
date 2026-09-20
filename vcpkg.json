@@ -1,0 +1,13 @@
+{
+  "name": "lancue",
+  "version": "0.1.0",
+  "builtin-baseline": "a7bd30319eeac16afbe18d64a855303a0a425e84",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "features": ["widgets", "network"]
+    },
+    "nlohmann-json",
+    "catch2"
+  ]
+}

@@ -1,0 +1,38 @@
+<!--
+  Embeds LanCue's two UI fonts (Manrope for Latin-script/English UI text,
+  Vazirmatn for Persian UI text) directly into the binary via Qt's
+  resource system, so the app's typography is correct on a fresh machine
+  regardless of whether the user happens to have these fonts installed
+  system-wide (Phase 7 requirement — see the Learnings entry on why this
+  is a qrc-embedded resource rather than a runtime-downloaded/optional
+  asset).
+
+  Any GUI executable that needs LanCue's UI fonts adds this same file as
+  a target source (AUTORCC is on globally — see the top-level
+  CMakeLists.txt) — currently only lancue-core (Phase 7's toast). See
+  core-lib/include/corelib/i18n for why the font *files* live here at
+  the shared resources/ level while the font *loading* code
+  (ui/fonts.h/.cpp) stays local to lancue-core for now rather than
+  moving into core-lib: only one executable actually loads them yet.
+
+  Only Regular/Medium/SemiBold/Bold static weights are bundled per
+  family — the toast only ever needs a title (SemiBold) and a subtitle
+  (Regular); Medium/Bold are included for Phase 9's settings UI, which
+  will want a slightly wider weight range for headings/emphasis without
+  a second phase re-downloading/re-vetting the same two font families.
+  Both are OFL-1.1 licensed (see each family's OFL.txt alongside its
+  files) — redistribution as part of an application is explicitly
+  permitted by that license.
+-->
+<RCC>
+    <qresource prefix="/fonts">
+        <file alias="manrope/Manrope-Regular.ttf">manrope/Manrope-Regular.ttf</file>
+        <file alias="manrope/Manrope-Medium.ttf">manrope/Manrope-Medium.ttf</file>
+        <file alias="manrope/Manrope-SemiBold.ttf">manrope/Manrope-SemiBold.ttf</file>
+        <file alias="manrope/Manrope-Bold.ttf">manrope/Manrope-Bold.ttf</file>
+        <file alias="vazirmatn/Vazirmatn-Regular.ttf">vazirmatn/Vazirmatn-Regular.ttf</file>
+        <file alias="vazirmatn/Vazirmatn-Medium.ttf">vazirmatn/Vazirmatn-Medium.ttf</file>
+        <file alias="vazirmatn/Vazirmatn-SemiBold.ttf">vazirmatn/Vazirmatn-SemiBold.ttf</file>
+        <file alias="vazirmatn/Vazirmatn-Bold.ttf">vazirmatn/Vazirmatn-Bold.ttf</file>
+    </qresource>
+</RCC>
