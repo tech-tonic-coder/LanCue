@@ -3,8 +3,12 @@
 # next to the .exe, and running without it fails immediately with:
 #   "Could not find the Qt platform plugin ... in ''"
 # This only affects executables that create a QApplication / QGuiApplication
-# (i.e. anything using Widgets or QML). A plain QCoreApplication console app
-# (lancue-core) never loads a platform plugin and doesn't need this.
+# (i.e. anything using Widgets or QML) *and* link a dynamically-built Qt6.
+# lancue-core has been a real QApplication (not QCoreApplication) since
+# Phase 7 (see main.cpp's own comment) — updated here after that stopped
+# being true, having gone unnoticed until a real CI run actually exercised
+# every target rather than just the ones a local dev session happens to
+# touch.
 #
 # Call lancue_deploy_qt_platform_plugin(<target>) right after the target's
 # add_executable()/target_link_libraries() calls for any GUI executable.
@@ -15,8 +19,44 @@
 # have disagreed on this before. Instead this locates the real file at
 # configure time with find_file() and fails configure with a clear message
 # (not a cryptic build-time copy error) if it can't be found.
+#
+# None of the above applies to a *statically*-linked Qt6 at all, which is
+# what vcpkg's own default triplets actually produce on Linux/macOS
+# (x64-linux, arm64-osx — both VCPKG_LIBRARY_LINKAGE static; only
+# x64-windows defaults to dynamic) — confirmed directly by a real CI run:
+# Qt6::Core resolved to a plain qwindows.dll on windows-x64-debug, but to
+# libQt6Core.a on both linux-x64-debug and macos-arm64-debug, with no
+# standalone plugin file to find at all there. A static Qt6 needs no
+# deployed plugin file in the first place: Qt's own CMake integration
+# links a sane default set of static plugins automatically for every Qt
+# module a target links against (confirmed directly against Qt's own
+# qt_import_plugins documentation — that command exists only to
+# *customize* the default set, never to enable it in the first place), so
+# linking Qt6::Widgets — which every GUI target here already does —
+# already pulls the platform integration plugin (QXcbIntegrationPlugin /
+# QCocoaIntegrationPlugin) and its Q_IMPORT_PLUGIN stub source in on its
+# own. See the STATIC_LIBRARY branch below.
+#
+# Switching Linux/macOS to a dynamic vcpkg triplet instead (to make the
+# existing file-deploy logic apply uniformly) was considered and rejected:
+# vcpkg ships no built-in dynamic triplet for Linux/macOS at all (Microsoft's
+# own docs show getting one means hand-writing a custom overlay triplet),
+# and qtbase specifically has a documented history of failing to build at
+# all on a custom Linux dynamic triplet (microsoft/vcpkg#9847). Supporting
+# vcpkg's own well-tested default (static) properly, rather than fighting
+# it, is the safer fix.
 
 function(lancue_deploy_qt_platform_plugin target)
+    get_target_property(_lancue_qt_core_type Qt6::Core TYPE)
+    if(_lancue_qt_core_type STREQUAL "STATIC_LIBRARY")
+        message(STATUS
+            "lancue_deploy_qt_platform_plugin: ${target} links a static Qt6::Core — "
+            "the platform plugin is already statically linked in via Qt6::Widgets "
+            "(see this function's own comment), nothing to deploy."
+        )
+        return()
+    endif()
+
     get_target_property(_lancue_qt_core_loc Qt6::Core LOCATION)
     if(NOT _lancue_qt_core_loc)
         message(FATAL_ERROR "lancue_deploy_qt_platform_plugin: could not resolve Qt6::Core's location for target ${target}.")
