@@ -66,10 +66,11 @@ touches `lancue-settings`:
   build; only Qt's own internals (which you're rarely stepping into anyway)
   stay optimized.
 
-`lancue-core` has no Qt plugin dependency and works fine in plain Debug too,
-but using `windows-x64-relwithdebinfo` for the whole solution avoids having
-to juggle two different configurations for two executables in the same
-solution.
+Phase 7 made `lancue-core` a `QApplication`/Widgets app too (it owns the
+toast window), so as of Phase 7 it has the exact same Release-only-plugin
+problem `lancue-settings` always had and also needs
+`windows-x64-relwithdebinfo`/`windows-x64-local` — it no longer "just works"
+in plain Debug the way earlier phases' comment here used to say.
 
 `windows-x64-debug` is still available and useful for things unrelated to
 Qt's plugin loading (e.g. debugging `core-lib` logic in isolation via the
@@ -86,8 +87,8 @@ test targets once Phase 1 adds them).
    in the configuration dropdown at the top toolbar. **Use `windows-x64-local`**
    if your vcpkg lives at `D:\Projects\Tools\vcpkg` — it's the same config as
    `windows-x64-relwithdebinfo` (see "Debugging during development" above;
-   this matters — `windows-x64-debug` will crash `lancue-settings` on
-   startup, see "Known limitation" below) but with `CMAKE_TOOLCHAIN_FILE`
+   this matters — `windows-x64-debug` will crash `lancue-core` and
+   `lancue-settings` on startup, see "Known limitation" below) but with `CMAKE_TOOLCHAIN_FILE`
    pointed straight at that install instead of relying on `VCPKG_ROOT`/VS's
    own bundled vcpkg (see §4.8 of the roadmap for why this preset exists
    separately from the others).
@@ -101,15 +102,21 @@ test targets once Phase 1 adds them).
 ### From the command line
 
 ```powershell
-cmake --preset windows-x64-debug
-cmake --build --preset windows-x64-debug
+cmake --preset windows-x64-relwithdebinfo
+cmake --build --preset windows-x64-relwithdebinfo
 ```
 
-Both executables land under `build\windows-x64-debug\`. Run `lancue-core`
-first (it has no console window once built with the default WIN32 subsystem
-on Windows — check `%LOCALAPPDATA%\lancue-core\logs\lancue-core.log` for
-startup confirmation), then run `lancue-settings`, which connects to it,
-sends a test message, and logs the reply before exiting.
+(`windows-x64-debug` also configures and builds, but both executables crash
+on startup — see "Known limitation" below — so it's not useful for actually
+running anything; it's still fine for `ctest`, which never loads the Qt
+platform plugin outside of the two executables it launches as subprocesses.)
+
+Both executables land under `build\windows-x64-relwithdebinfo\`. Run
+`lancue-core` first (it has no console window once built with the default
+WIN32 subsystem on Windows — check
+`%LOCALAPPDATA%\lancue-core\logs\lancue-core.log` for startup confirmation),
+then run `lancue-settings`, which connects to it, sends a test message, and
+logs the reply before exiting.
 
 ## Notes
 
@@ -122,12 +129,12 @@ sends a test message, and logs the reply before exiting.
 - Warnings are treated as errors on every platform (see `cmake/*-toolchain.cmake`)
   per Phase 0's CI requirement — a warning in new code fails the build, not
   just CI.
-- `lancue-settings` needs Qt's "platforms" plugin at runtime (it's a Widgets
-  app); the build automatically copies it next to the .exe and generates a
-  `qt.conf` on every build (see `cmake/qt-deploy-platform-plugin.cmake`).
-  `lancue-core` doesn't need this — it's `QCoreApplication`-only and never
-  loads a GUI platform plugin, which is why it ran fine without any extra
-  step.
+- Both `lancue-settings` and, since Phase 7, `lancue-core` need Qt's
+  "platforms" plugin at runtime (both are Widgets apps now); the build
+  automatically copies it next to each .exe and generates a `qt.conf` on
+  every build (see `cmake/qt-deploy-platform-plugin.cmake`,
+  `lancue_deploy_qt_platform_plugin(lancue-core)` in
+  `lancue-core/CMakeLists.txt`).
 - **Known limitation:** this vcpkg `qtbase` build only ships a Release-mode
   `qwindows.dll`, and Qt refuses to load a Release plugin into a Debug
   executable. See "Debugging during development" above for the recommended

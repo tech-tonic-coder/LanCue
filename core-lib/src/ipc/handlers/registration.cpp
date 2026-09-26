@@ -20,12 +20,14 @@
 #include "ipc/handlers/set_toast_monitor_index_handler.h"
 #include "ipc/handlers/set_toast_monitor_mode_handler.h"
 #include "ipc/handlers/set_toast_position_handler.h"
+#include "ipc/handlers/shutdown_handler.h"
 
 namespace lancue::ipc {
 
 void registerBuiltinHandlers(Dispatcher& dispatcher, settings::SettingsManager& settingsManager,
                               platform::SelectionClipboardBridge& selectionBridge) {
     handlers::registerPingHandler(dispatcher);
+    handlers::registerShutdownHandler(dispatcher);
     handlers::registerSetToastDurationHandler(dispatcher, settingsManager);
     handlers::registerSetToastOpacityPercentHandler(dispatcher, settingsManager);
     handlers::registerSetFollowerDurationHandler(dispatcher, settingsManager);

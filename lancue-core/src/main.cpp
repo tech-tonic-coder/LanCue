@@ -112,7 +112,22 @@ int main(int argc, char* argv[]) {
 
     lancue::EventBus eventBus;
 
-    lancue::settings::SettingsManager settingsManager(eventBus);
+    // LANCUE_SETTINGS_FILE_OVERRIDE, when set, is used verbatim as the
+    // settings file path instead of the real per-OS QStandardPaths
+    // location — this exists solely for the integration tests
+    // (tests/integration/settings_roundtrip_test.cpp), which need a
+    // throwaway settings file instead of this machine's real one.
+    // Deliberately not done by having the tests override the
+    // LOCALAPPDATA/XDG_CONFIG_HOME environment variable instead: on
+    // Windows, QStandardPaths::AppConfigLocation resolves via the native
+    // SHGetKnownFolderPath() API, which reads the real per-user profile
+    // directly from the OS and ignores the LOCALAPPDATA environment
+    // variable entirely, so that approach silently pointed every test
+    // process at this developer machine's real settings.json instead of
+    // an isolated one. qEnvironmentVariable() returns an empty string
+    // when unset, which is exactly the "no override" sentinel
+    // SettingsManager::filePath() already checks for.
+    lancue::settings::SettingsManager settingsManager(eventBus, qEnvironmentVariable("LANCUE_SETTINGS_FILE_OVERRIDE"));
     settingsManager.load();
 
     auto clipboardController = lancue::platform::createClipboardController();

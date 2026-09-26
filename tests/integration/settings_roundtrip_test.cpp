@@ -17,25 +17,27 @@
 
 namespace {
 
-// Points lancue-core's QStandardPaths::AppConfigLocation at a throwaway
-// temp directory instead of the real developer machine's config location
-// — this test writes a real settings file to disk on purpose (that's the
-// point), and it must not be the same file `lancue-core` would use
-// outside of a test run. Confirmed on real Windows hardware (2026-08-06,
-// via Mahdi's own manual run — see the Phase 4 Learnings entry) that
-// AppConfigLocation resolves to `%LOCALAPPDATA%\lancue-core`, not
-// `%APPDATA%\lancue-core` as this comment originally assumed — the
-// `LOCALAPPDATA` override below reflects that confirmed behavior, not a
-// guess. macOS's own equivalent remains an open gap for whoever first
-// runs this suite there for real (§4.3 — not solved speculatively here
-// since it can't be verified in this environment).
+// Points lancue-core's settings file at a throwaway temp path instead of
+// this developer machine's real one — this test writes a real settings
+// file to disk on purpose (that's the point), and it must not be the same
+// file `lancue-core` would use outside of a test run.
+//
+// This used to override LOCALAPPDATA/XDG_CONFIG_HOME and rely on
+// QStandardPaths::AppConfigLocation picking it up. Confirmed on real
+// Windows hardware (2026-09-25) that this silently does nothing on
+// Windows: QStandardPaths::AppConfigLocation resolves via the native
+// SHGetKnownFolderPath() API there, which reads the real per-user profile
+// directly from the OS and never looks at the LOCALAPPDATA environment
+// variable — so every test process was actually reading/writing this
+// developer machine's real settings.json the whole time, silently leaking
+// state between test runs (see the Phase 8 Learnings entry). Replaced
+// with LANCUE_SETTINGS_FILE_OVERRIDE (main.cpp), which lancue-core uses
+// verbatim as the settings file path, bypassing QStandardPaths entirely —
+// works identically on every OS, so the old Linux-only XDG_CONFIG_HOME
+// branch is gone too.
 QProcessEnvironment isolatedConfigEnvironment(const QString& configDir) {
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-#if defined(Q_OS_LINUX)
-    env.insert(QStringLiteral("XDG_CONFIG_HOME"), configDir);
-#elif defined(Q_OS_WIN)
-    env.insert(QStringLiteral("LOCALAPPDATA"), configDir);
-#endif
+    env.insert(QStringLiteral("LANCUE_SETTINGS_FILE_OVERRIDE"), configDir + QStringLiteral("/lancue-core/settings.json"));
     return env;
 }
 
@@ -69,6 +71,21 @@ lancue::ipc::Message sendAndWait(QLocalSocket& socket, const lancue::ipc::Messag
     const auto messages = reader.feed(std::string(chunk.constData(), static_cast<size_t>(chunk.size())));
     REQUIRE(messages.size() == 1);
     return messages[0];
+}
+
+// Asks lancue-core to shut down over IPC (kShutdown) instead of
+// QProcess::terminate(): on Windows, terminate() posts WM_CLOSE to the
+// process's top-level windows, but lancue-core usually has none open (the
+// toast is transient) and sets setQuitOnLastWindowClosed(false) even when
+// one exists, so terminate() alone never made it exit — see the Phase 8
+// Learnings entry.
+void shutdownAndWait(QLocalSocket& socket, QProcess& process) {
+    lancue::ipc::Message shutdown;
+    shutdown.type = lancue::ipc::kShutdown;
+    const lancue::ipc::Message reply = sendAndWait(socket, shutdown);
+    CHECK(reply.type == lancue::ipc::kAck);
+    socket.disconnectFromServer();
+    REQUIRE(process.waitForFinished(3000));
 }
 
 } // namespace
@@ -148,9 +165,7 @@ TEST_CASE("settings live-preview over IPC, persist on SaveSettings, survive a re
     CHECK(onDisk.value(lancue::settings::kFieldToastDuration, -1) == 9999);
     CHECK(onDisk[lancue::settings::kFieldLayoutColorAssignments].value("fa-ir", -1) == 2);
 
-    socket.disconnectFromServer();
-    coreProcess.terminate();
-    REQUIRE(coreProcess.waitForFinished(3000));
+    shutdownAndWait(socket, coreProcess);
 
     // 4) A second, fresh process pointed at the same config directory
     // should load exactly what the first one saved — the real point of
@@ -169,9 +184,7 @@ TEST_CASE("settings live-preview over IPC, persist on SaveSettings, survive a re
     CHECK(reply.payload.value(lancue::settings::kFieldToastDuration, -1) == 9999);
     CHECK(reply.payload[lancue::settings::kFieldLayoutColorAssignments].value("fa-ir", -1) == 2);
 
-    secondSocket.disconnectFromServer();
-    secondCoreProcess.terminate();
-    REQUIRE(secondCoreProcess.waitForFinished(3000));
+    shutdownAndWait(secondSocket, secondCoreProcess);
 }
 
 TEST_CASE("a corrupt settings file is replaced in memory by defaults, not propagated", "[integration][settings]") {
@@ -210,7 +223,5 @@ TEST_CASE("a corrupt settings file is replaced in memory by defaults, not propag
     REQUIRE(reply.type == lancue::ipc::kAck);
     CHECK(reply.payload.value(lancue::settings::kFieldToastDuration, -1) == lancue::settings::kDefaultToastDurationMs);
 
-    socket.disconnectFromServer();
-    coreProcess.terminate();
-    REQUIRE(coreProcess.waitForFinished(3000));
+    shutdownAndWait(socket, coreProcess);
 }

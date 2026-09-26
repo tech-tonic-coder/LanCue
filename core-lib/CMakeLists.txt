@@ -84,6 +84,7 @@ add_library(core-lib STATIC
     src/ipc/ipc_client.cpp
     src/ipc/handlers/registration.cpp
     src/ipc/handlers/ping_handler.cpp
+    src/ipc/handlers/shutdown_handler.cpp
     src/ipc/handlers/set_toast_duration_handler.cpp
     src/ipc/handlers/set_toast_opacity_percent_handler.cpp
     src/ipc/handlers/set_follower_duration_handler.cpp

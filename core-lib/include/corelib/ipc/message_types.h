@@ -84,4 +84,15 @@ inline constexpr const char* kSaveSettings = "SaveSettings";
 inline constexpr const char* kDebugCaptureSelection = "DebugCaptureSelection";
 inline constexpr const char* kDebugPasteReplacement = "DebugPasteReplacement";
 
+// Phase 8 (integration-test hardening): asks lancue-core to quit its Qt
+// event loop cleanly and exit. Added because QProcess::terminate() posts
+// WM_CLOSE to the process's top-level windows on Windows, and lancue-core
+// (a) has no visible top-level window most of the time (the toast only
+// exists transiently) and (b) sets QApplication::setQuitOnLastWindowClosed
+// (false) even when one does — so terminate() alone has nothing to act on
+// and the process never exits from it. Replies Ack immediately, then quits
+// on the next event-loop iteration (shutdown_handler.cpp) so the Ack has
+// already been handed to the OS before the process exits.
+inline constexpr const char* kShutdown = "Shutdown";
+
 } // namespace lancue::ipc

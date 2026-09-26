@@ -32,6 +32,21 @@ name: CI
 # before being caught — see the Phase 8 roadmap entry (round 7) for the
 # full account, including what's still unverified because it hasn't
 # actually executed there yet either.
+#
+# Round 8: the Windows matrix entry switched from windows-x64-debug to
+# windows-x64-relwithdebinfo. vcpkg's qtbase build only ships a
+# Release-mode Qt platform plugin (qwindows.dll), which Qt refuses to
+# load into a Debug executable — a pre-existing, already-documented
+# constraint that only ever affected lancue-settings until lancue-core
+# itself became a QApplication/Widgets app (Phase 7, main.cpp's own
+# comment). windows-x64-debug therefore made *both* executables crash on
+# startup before ever reaching their own main() logic, which is why the
+# three integration tests that spawn a real lancue-core subprocess
+# (tests/integration/) failed under it — confirmed directly, not
+# guessed, by reproducing the exact failure locally and then reproducing
+# it disappearing under windows-x64-relwithdebinfo instead.
+# windows-x64-relwithdebinfo inherits windows-x64-debug (CMakePresets.json)
+# and needs no separate Ninja/MSVC setup beyond what's already below.
 
 on:
   push:
@@ -65,7 +80,7 @@ jobs:
           - os: ubuntu-latest
             preset: linux-x64-debug
           - os: windows-latest
-            preset: windows-x64-debug
+            preset: windows-x64-relwithdebinfo
           - os: macos-latest
             preset: macos-arm64-debug
     runs-on: ${{ matrix.os }}
@@ -267,7 +282,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath ".\build\windows-x64-debug\lancue-core\lancue-core.exe" -PassThru
+          $proc = Start-Process -FilePath ".\build\windows-x64-relwithdebinfo\lancue-core\lancue-core.exe" -PassThru
           Start-Sleep -Seconds 5
           $logPath = Join-Path $env:LOCALAPPDATA "lancue-core\logs\lancue-core.log"
           if (-not (Test-Path $logPath)) {

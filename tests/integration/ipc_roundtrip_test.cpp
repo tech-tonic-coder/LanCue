@@ -50,6 +50,17 @@ TEST_CASE("a client can Ping a real lancue-core process and get Pong back", "[in
     REQUIRE(messages.size() == 1);
     CHECK(messages[0].type == lancue::ipc::kPong);
 
-    coreProcess.terminate();
-    coreProcess.waitForFinished(3000);
+    // kShutdown, not QProcess::terminate(): on Windows, terminate() posts
+    // WM_CLOSE to the process's top-level windows, but lancue-core
+    // usually has none open (the toast is transient) and sets
+    // setQuitOnLastWindowClosed(false) even when one exists, so
+    // terminate() alone never made it exit — see the Phase 8 Learnings
+    // entry.
+    lancue::ipc::Message shutdown;
+    shutdown.type = lancue::ipc::kShutdown;
+    const std::string shutdownFrame = lancue::ipc::frameMessage(shutdown);
+    socket.write(shutdownFrame.data(), static_cast<qint64>(shutdownFrame.size()));
+    REQUIRE(socket.waitForReadyRead(2000));
+    socket.disconnectFromServer();
+    REQUIRE(coreProcess.waitForFinished(3000));
 }
