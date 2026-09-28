@@ -73,6 +73,20 @@ void IpcServer::onReadyRead() {
             }
             const std::string frame = frameMessage(reply);
             socket->write(frame.data(), static_cast<qint64>(frame.size()));
+
+            // Pumps the event loop until Qt has actually handed these
+            // bytes to the OS (write() alone only queues them in Qt's own
+            // buffer) — added because kShutdown's handler queues
+            // QCoreApplication::quit() for the very next event-loop turn,
+            // and without this, that turn could arrive before Qt's socket
+            // notifier ever got a chance to flush this reply, so the
+            // client's waitForReadyRead() timed out even though the
+            // handler had already replied. Confirmed on a real GitHub
+            // Actions Linux run (not just this sandbox) that the 0ms timer
+            // alone is not a hard guarantee. A bounded timeout rather than
+            // an unbounded wait, so a client that stops reading can never
+            // hang the daemon on a reply it will never pick up.
+            socket->waitForBytesWritten(1000);
         });
     }
 }

@@ -81,7 +81,15 @@ private:
     void handleConvertToTarget(const QString& targetLayout);
 
     EventBus& m_eventBus;
-    settings::SettingsManager& m_settingsManager;
+    // Not yet read anywhere in this feature — accepted for a consistent
+    // constructor shape with the rest of FeatureRegistry's features and
+    // reserved for settings-driven conversion behavior later. Only
+    // Clang's -Wunused-private-field catches this (GCC/MSVC don't warn on
+    // it at all), so it stayed unnoticed until the first real -Werror
+    // macOS build in CI. [[maybe_unused]] rather than removing the field:
+    // removing it would just have to be re-added the moment this feature
+    // actually needs a setting.
+    [[maybe_unused]] settings::SettingsManager& m_settingsManager;
     platform::SelectionClipboardBridge& m_selectionBridge;
 
     // Both empty until at least one LayoutChanged event arrives; on the
