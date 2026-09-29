@@ -278,30 +278,52 @@ jobs:
       # interactive desktop for SetWindowsHookExW/window creation to
       # succeed the same way they do on Mahdi's own machine hasn't been
       # confirmed by an actual run of this workflow yet.
+      # Round 8, second pass: was a flat Start-Sleep 5 + poll the log
+      # file's mere existence. Replaced because (a) file-existence is not
+      # an event-driven readiness signal (§4.7) and (b) it genuinely
+      # failed on a real run — Windows GitHub-hosted runners are
+      # well-documented as inconsistently slow for a fresh process's
+      # first launch (not confidently attributable to Defender
+      # specifically; disabling it hasn't fixed this for others either),
+      # and 5 seconds wasn't always enough. lancue-debug-cli (already
+      # built above, already the project's own tool for exactly this) now
+      # does a real IPC round-trip instead: connectToServer()/
+      # waitForConnected() is a single OS-level blocking wait, not a
+      # manual poll loop, and a successful Ping reply is only possible
+      # once lancue-core's Qt event loop (app.exec(), main.cpp) is
+      # running — which happens strictly after featureRegistry.startAll()
+      # already completed synchronously — so a Ping reply by itself
+      # already guarantees every feature-start log line below has already
+      # been written. No sleep needed at all.
       - name: Smoke test — start the real daemon (exploratory)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath ".\build\windows-x64-relwithdebinfo\lancue-core\lancue-core.exe" -PassThru
-          Start-Sleep -Seconds 5
-          $logPath = Join-Path $env:LOCALAPPDATA "lancue-core\logs\lancue-core.log"
-          if (-not (Test-Path $logPath)) {
-            Write-Host "::error::No log file at $logPath — lancue-core may not have started at all under this runner's session."
+          $cli = ".\build\windows-x64-relwithdebinfo\tools\lancue-debug-cli\lancue-debug-cli.exe"
+
+          & $cli Ping
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::lancue-core did not respond to a real Ping over IPC."
             Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
             exit 1
           }
-          Get-Content $logPath -Tail 60
-          Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
 
+          $logPath = Join-Path $env:LOCALAPPDATA "lancue-core\logs\lancue-core.log"
+          Get-Content $logPath -Tail 60
           $log = Get-Content $logPath -Raw
           if ($log -notmatch "MouseMoveHookWindows: low-level mouse hook installed\.") {
             Write-Host "::error::MouseMoveHookWindows never reported a successful install."
+            & $cli Shutdown
             exit 1
           }
           if ($log -notmatch "FollowerFeature: started\.") {
             Write-Host "::error::FollowerFeature never reported a successful start."
+            & $cli Shutdown
             exit 1
           }
+
+          & $cli Shutdown
 
       # No run/smoke-test step for macOS: CGEventTapCreate will
       # legitimately return null without Input Monitoring permission,
