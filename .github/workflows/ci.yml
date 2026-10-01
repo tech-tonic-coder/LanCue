@@ -295,6 +295,22 @@ jobs:
       # already completed synchronously — so a Ping reply by itself
       # already guarantees every feature-start log line below has already
       # been written. No sleep needed at all.
+      # Why this is a retry loop and not a single blocking wait: on
+      # Windows, QLocalSocket::connectToServer() does one immediate,
+      # synchronous CreateFile() against the named pipe — if the pipe
+      # doesn't exist yet, it fails instantly with ServerNotFoundError
+      # (Qt's own source, qlocalsocket_win.cpp: ERROR_FILE_NOT_FOUND ->
+      # "Invalid name"), before waitForConnected()'s timeout ever comes
+      # into play. Confirmed directly: a real run here failed in well
+      # under a second even with that timeout raised to 15s (reverted —
+      # it couldn't have helped). The underlying Win32 WaitNamedPipe() API
+      # itself explicitly does not block for a pipe with zero instances —
+      # per Microsoft's own docs, it returns immediately regardless of
+      # timeout when the pipe doesn't exist at all, only blocking when
+      # the pipe exists but every instance is busy. So this is the one
+      # case where some form of repeated attempt is genuinely the only
+      # way to wait for a fresh lancue-core to come up — not a stand-in
+      # for a better option.
       - name: Smoke test — start the real daemon (exploratory)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -302,9 +318,17 @@ jobs:
           $proc = Start-Process -FilePath ".\build\windows-x64-relwithdebinfo\lancue-core\lancue-core.exe" -PassThru
           $cli = ".\build\windows-x64-relwithdebinfo\tools\lancue-debug-cli\lancue-debug-cli.exe"
 
-          & $cli Ping
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::lancue-core did not respond to a real Ping over IPC."
+          $connected = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            & $cli Ping
+            if ($LASTEXITCODE -eq 0) {
+              $connected = $true
+              break
+            }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $connected) {
+            Write-Host "::error::lancue-core did not respond to a real Ping over IPC within 20s."
             Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
             exit 1
           }

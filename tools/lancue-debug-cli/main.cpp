@@ -69,15 +69,7 @@ int main(int argc, char* argv[]) {
 
     QLocalSocket socket;
     socket.connectToServer(lancue::ipc::socketName());
-    // 15s, not the more typical 2s: a real GitHub Actions Windows run
-    // (round 8) showed a freshly Start-Process'd lancue-core.exe can take
-    // noticeably longer than 2s to reach IpcServer::start() on a cold
-    // launch — this tool's own CI smoke-test usage hit that directly.
-    // One bounded blocking wait, not a retry loop: when lancue-core is
-    // already running (this tool's normal interactive use case),
-    // waitForConnected() returns as soon as connected, so this only ever
-    // costs the extra time when something is actually slow to start.
-    if (!socket.waitForConnected(15000)) {
+    if (!socket.waitForConnected(2000)) {
         std::fprintf(stderr, "could not connect to lancue-core: %s. Is it running?\n",
                       qPrintable(socket.errorString()));
         return 1;
