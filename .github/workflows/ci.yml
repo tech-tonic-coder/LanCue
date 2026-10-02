@@ -333,6 +333,11 @@ jobs:
             exit 1
           }
 
+          # %LOCALAPPDATA%, matching SettingsManager's AppConfigLocation:
+          # Logger now uses AppLocalDataLocation (round 9 fix, logger.cpp)
+          # instead of AppDataLocation (which was the Roaming profile,
+          # %APPDATA% — a different real folder, and the actual reason an
+          # earlier version of this step never found a log file here).
           $logPath = Join-Path $env:LOCALAPPDATA "lancue-core\logs\lancue-core.log"
           Get-Content $logPath -Tail 60
           $log = Get-Content $logPath -Raw

@@ -20,10 +20,16 @@ QString SettingsManager::filePath() const {
         return m_overrideFilePath;
     }
 
-    // AppConfigLocation, not Logger's AppDataLocation (§5 Phase 4: "storage
-    // location per OS convention"). The two resolve to the same directory
-    // on Windows/macOS but differ on Linux — AppConfigLocation is
-    // $XDG_CONFIG_HOME (~/.config/lancue), AppDataLocation is
+    // AppConfigLocation, not Logger's AppLocalDataLocation (§5 Phase 4:
+    // "storage location per OS convention") — a deliberate choice to keep
+    // settings.json under the platform's dedicated config directory
+    // rather than its data directory. The two resolve to the same real
+    // directory on Windows and macOS (round 9: confirmed via Qt's own
+    // docs, after an earlier version of this comment wrongly claimed
+    // Logger's old AppDataLocation already matched on Windows too — it
+    // didn't, Logger has since been switched to AppLocalDataLocation to
+    // actually match) but differ on Linux — AppConfigLocation is
+    // $XDG_CONFIG_HOME (~/.config/lancue), AppLocalDataLocation is
     // $XDG_DATA_HOME (~/.local/share/lancue) — and "~/.config" is
     // literally what this phase's own spec names, so this is a deliberate
     // choice, not an oversight that Logger and SettingsManager use

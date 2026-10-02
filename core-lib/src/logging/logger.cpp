@@ -33,7 +33,17 @@ void writeLine(const QString& level, const QString& message) {
 namespace Logger {
 
 void init(const QString& componentName) {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/logs");
+    // AppLocalDataLocation, not AppDataLocation: on Windows, AppDataLocation
+    // resolves to the Roaming profile (%APPDATA%) while AppLocalDataLocation
+    // and SettingsManager's AppConfigLocation both resolve to the Local
+    // profile (%LOCALAPPDATA%) — confirmed via Qt's own docs (round 9: a
+    // real CI run exposed that logs and settings.json lived in two
+    // different folders on Windows, which a since-corrected comment in
+    // settings_manager.cpp had wrongly assumed couldn't happen). Logs are
+    // machine-specific operational data anyway, which is a better fit for
+    // the Local profile than something meant to roam with the user.
+    const QString dir =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/logs");
     QDir().mkpath(dir);
 
     delete g_logFile;
